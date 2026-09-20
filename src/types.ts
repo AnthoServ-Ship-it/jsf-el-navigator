@@ -7,6 +7,9 @@ export interface SourceSpan {
 /** Tipo de miembro Java que puede exponerse mediante Expression Language. */
 export type JavaMemberKind = "method" | "field";
 
+/** Visibilidad declarada de un miembro Java. */
+export type JavaVisibility = "public" | "protected" | "private" | "package";
+
 /** Método o campo encontrado durante el análisis de una clase Java. */
 export interface JavaMember {
     name: string;
@@ -16,10 +19,12 @@ export interface JavaMember {
     propertyName?: string;
     parameterCount?: number;
     parameterTypes?: string[];
+    visibility?: JavaVisibility;
 }
 
 /** Bean JSF/CDI descubierto en un archivo Java. */
 export interface ParsedJavaBean {
+    typeKind: "class" | "interface";
     beanNames: string[];
     className: string;
     classSpan: SourceSpan;
@@ -43,4 +48,12 @@ export interface ElTarget {
     beanName: string;
     segments: ElSegment[];
     selectedIndex: number;
+}
+
+/** Variable de fila/iteración y la expresión EL que proporciona sus elementos. */
+export interface ElVariableScope {
+    name: string;
+    binding: ElTarget;
+    start: number;
+    end: number;
 }

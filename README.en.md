@@ -57,7 +57,8 @@ version:
 - Implementation selection when an interface has multiple candidates.
 - Overload selection based on argument count and inferred types.
 - Inherited methods and sibling Maven/Gradle modules.
-- Hover previews, completion and diagnostics for unresolved references.
+- JavaDoc, signature and owning class while holding `Ctrl` over a navigable method.
+- Previews and diagnostics for unresolved references.
 - `Shift+F12` references from Java back to XHTML and injected calls.
 - Per-module in-memory index with automatic invalidation.
 - Fully local processing: no telemetry and no source-code uploads.

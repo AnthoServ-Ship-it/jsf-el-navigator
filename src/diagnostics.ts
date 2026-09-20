@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { type BeanIndex } from "./beanIndex";
-import { findAllElTargets } from "./elParser";
+import { type ElAnalysisCache } from "./elAnalysisCache";
 import { findJavaMembers } from "./javaParser";
 
 /** Marca beans y miembros JSF inexistentes sin molestar a bundles como #{lbl...}. */
@@ -9,7 +9,10 @@ export class JsfElDiagnostics implements vscode.Disposable {
     private readonly disposables: vscode.Disposable[] = [];
     private readonly timers = new Map<string, NodeJS.Timeout>();
 
-    public constructor(private readonly index: BeanIndex) {
+    public constructor(
+        private readonly index: BeanIndex,
+        private readonly analysis: ElAnalysisCache
+    ) {
         this.disposables.push(
             vscode.workspace.onDidOpenTextDocument((document) => this.schedule(document)),
             vscode.workspace.onDidChangeTextDocument((event) => this.schedule(event.document)),
@@ -34,6 +37,13 @@ export class JsfElDiagnostics implements vscode.Disposable {
 
     private schedule(document: vscode.TextDocument): void {
         if (!document.fileName.toLowerCase().endsWith(".xhtml")) return;
+        const enabled = vscode.workspace
+            .getConfiguration("jsfElNavigator", document.uri)
+            .get<boolean>("diagnostics.enabled", false);
+        if (!enabled) {
+            this.collection.delete(document.uri);
+            return;
+        }
         const key = document.uri.toString();
         const previous = this.timers.get(key);
         if (previous) clearTimeout(previous);
@@ -49,14 +59,15 @@ export class JsfElDiagnostics implements vscode.Disposable {
     private async validate(document: vscode.TextDocument): Promise<void> {
         const enabled = vscode.workspace
             .getConfiguration("jsfElNavigator", document.uri)
-            .get<boolean>("diagnostics.enabled", true);
+            .get<boolean>("diagnostics.enabled", false);
         if (!enabled || document.isClosed) {
             this.collection.delete(document.uri);
             return;
         }
 
         const diagnostics: vscode.Diagnostic[] = [];
-        const targets = findAllElTargets(document.getText());
+        const documentVersion = document.version;
+        const targets = this.analysis.getTargets(document);
         const grouped = new Map<string, typeof targets>();
         for (const target of targets) {
             const current = grouped.get(target.beanName) ?? [];
@@ -100,7 +111,9 @@ export class JsfElDiagnostics implements vscode.Disposable {
             }
         }
 
-        this.collection.set(document.uri, diagnostics);
+        if (!document.isClosed && document.version === documentVersion) {
+            this.collection.set(document.uri, diagnostics);
+        }
     }
 }
 

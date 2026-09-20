@@ -1,9 +1,11 @@
 import { readFile } from "node:fs/promises";
 import * as vscode from "vscode";
 import { type BeanIndex, type IndexedBean } from "./beanIndex";
-import { findElTargetAt } from "./elParser";
+import { type ElAnalysisCache } from "./elAnalysisCache";
 import { findJavaMembers, parseJavaBean } from "./javaParser";
+import { writeLog } from "./logging";
 import { findProjectRoot } from "./moduleResolver";
+import { type ResourceBundleResolver } from "./resourceBundleResolver";
 import { type SourceSpan } from "./types";
 
 /** Implementa F12 y Ctrl+clic desde un archivo XHTML hacia el código Java. */
@@ -12,7 +14,9 @@ export class JsfElDefinitionProvider implements vscode.DefinitionProvider {
 
     public constructor(
         private readonly index: BeanIndex,
-        private readonly output: vscode.OutputChannel
+        private readonly output: vscode.OutputChannel,
+        private readonly analysis: ElAnalysisCache,
+        private readonly resourceBundles: ResourceBundleResolver
     ) {}
 
     public async provideDefinition(
@@ -40,26 +44,43 @@ export class JsfElDefinitionProvider implements vscode.DefinitionProvider {
             return undefined;
         }
 
-        const target = findElTargetAt(document.getText(), document.offsetAt(position));
+        const target = this.analysis.findTargetAt(document, document.offsetAt(position));
         if (!target) {
-            this.output.appendLine(
-                `[INFO] El cursor no está sobre una referencia EL navegable (${document.fileName}:${position.line + 1}).`
-            );
             return undefined;
         }
 
-        this.output.appendLine(
-            `[INFO] Resolviendo ${target.segments.map((item) => item.name).join(".")} desde ${document.fileName}:${position.line + 1}.`
+        const bundleResolution = await this.resourceBundles.resolve(document, target, token);
+        if (bundleResolution) {
+            return bundleResolution.links.length > 0 ? bundleResolution.links : undefined;
+        }
+
+        writeLog(
+            this.output,
+            "debug",
+            `Resolviendo ${target.segments.map((item) => item.name).join(".")} desde ${document.fileName}:${position.line + 1}.`,
+            document.uri
         );
 
-        const beans = await this.index.findBeans(document.uri, target.beanName, token);
+        const variable = this.analysis.findVariableAt(
+            document,
+            target.expressionStart,
+            target.beanName
+        );
+        const beans = variable
+            ? await this.resolveVariableTypes(document, variable.binding.segments, token)
+            : await this.index.findBeans(document.uri, target.beanName, token);
         if (token.isCancellationRequested) {
             return undefined;
         }
 
         if (beans.length === 0) {
-            this.output.appendLine(
-                `[INFO] Bean no encontrado en el módulo actual: ${target.beanName}`
+            writeLog(
+                this.output,
+                "debug",
+                variable
+                    ? `No se pudo inferir el tipo de la variable XHTML ${target.beanName}.`
+                    : `Bean no encontrado en el módulo actual: ${target.beanName}`,
+                document.uri
             );
             return undefined;
         }
@@ -96,12 +117,53 @@ export class JsfElDefinitionProvider implements vscode.DefinitionProvider {
         }
 
         if (links.length === 0) {
-            this.output.appendLine(
-                `[INFO] El bean ${target.beanName} fue encontrado, pero no contiene el miembro público ${selected.name}.`
+            writeLog(
+                this.output,
+                "debug",
+                `El bean ${target.beanName} fue encontrado, pero no contiene el miembro público ${selected.name}.`,
+                document.uri
             );
         }
 
         return links.length > 0 ? links : undefined;
+    }
+
+    private async resolveVariableTypes(
+        document: vscode.TextDocument,
+        bindingSegments: Array<{ name: string; invoked: boolean }>,
+        token: vscode.CancellationToken
+    ): Promise<IndexedBean[]> {
+        let currentTypes = await this.index.findBeans(document.uri, bindingSegments[0].name, token);
+        let returnTypes: string[] = [];
+
+        for (let index = 1; index < bindingSegments.length; index += 1) {
+            const segment = bindingSegments[index];
+            const members = currentTypes.flatMap((type) =>
+                findJavaMembers(type, segment.name, segment.invoked)
+            );
+            returnTypes = members
+                .map((member) => member.returnType)
+                .filter((type): type is string => Boolean(type));
+
+            if (index < bindingSegments.length - 1) {
+                currentTypes = [];
+                for (const typeName of new Set(returnTypes.map(simpleTypeName).filter(Boolean))) {
+                    currentTypes.push(...(await this.findTypes(document.uri, typeName as string)));
+                }
+            }
+            if (token.isCancellationRequested || returnTypes.length === 0) return [];
+        }
+
+        const elementNames = new Set(
+            returnTypes
+                .map(iterationElementTypeName)
+                .filter((name): name is string => Boolean(name))
+        );
+        const elementTypes: IndexedBean[] = [];
+        for (const typeName of elementNames) {
+            elementTypes.push(...(await this.findTypes(document.uri, typeName)));
+        }
+        return token.isCancellationRequested ? [] : elementTypes;
     }
 
     private async resolveNestedMember(
@@ -130,8 +192,11 @@ export class JsfElDefinitionProvider implements vscode.DefinitionProvider {
                     )
                 );
                 if (links.length === 0) {
-                    this.output.appendLine(
-                        `[INFO] No se pudo resolver el segmento EL anidado ${segment.name}.`
+                    writeLog(
+                        this.output,
+                        "debug",
+                        `No se pudo resolver el segmento EL anidado ${segment.name}.`,
+                        document.uri
                     );
                 }
                 return links.length > 0 ? links : undefined;
@@ -164,10 +229,16 @@ export class JsfElDefinitionProvider implements vscode.DefinitionProvider {
         }
 
         const build = (async () => {
-            const files = await vscode.workspace.findFiles(
+            let files = await vscode.workspace.findFiles(
                 new vscode.RelativePattern(projectRoot, `**/src/main/java/**/${typeName}.java`),
                 "**/{target,build,node_modules,.git}/**"
             );
+            if (files.length === 0) {
+                files = await vscode.workspace.findFiles(
+                    `**/src/main/java/**/${typeName}.java`,
+                    "**/{target,build,node_modules,.git}/**"
+                );
+            }
             const types: IndexedBean[] = [];
             for (const uri of files) {
                 const source =
@@ -226,4 +297,21 @@ function simpleTypeName(returnType: string | undefined): string | undefined {
             .replace(/\[\s*\]/g, "")
             .trim();
     return raw.slice(raw.lastIndexOf(".") + 1);
+}
+
+function iterationElementTypeName(returnType: string): string | undefined {
+    const array = /([A-Za-z_$][A-Za-z0-9_$.]*)\s*\[\s*\]\s*$/.exec(returnType)?.[1];
+    if (array) return array.slice(array.lastIndexOf(".") + 1);
+
+    const open = returnType.indexOf("<");
+    const close = returnType.lastIndexOf(">");
+    if (open < 0 || close <= open) return undefined;
+
+    const firstArgument = returnType
+        .slice(open + 1, close)
+        .split(",", 1)[0]
+        .replace(/^\s*\?\s*(?:extends|super)\s+/, "")
+        .trim();
+    const nestedRaw = firstArgument.replace(/<.*>/, "").trim();
+    return nestedRaw.slice(nestedRaw.lastIndexOf(".") + 1) || undefined;
 }

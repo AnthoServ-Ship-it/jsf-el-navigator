@@ -8,7 +8,9 @@ async function main(): Promise<void> {
 
     const extensionDevelopmentPath = path.resolve(__dirname, "../..");
     const extensionTestsPath = path.resolve(__dirname, "suite/index");
-    const fixturePath = path.resolve(extensionDevelopmentPath, "src/test/fixtures/sample-app");
+    const fixturePath = process.env.JSF_EL_TEST_WORKSPACE
+        ? path.resolve(process.env.JSF_EL_TEST_WORKSPACE)
+        : path.resolve(extensionDevelopmentPath, "src/test/fixtures/sample-app");
 
     await runTests({
         extensionDevelopmentPath,

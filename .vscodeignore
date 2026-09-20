@@ -16,4 +16,6 @@ tsconfig.json
 **/*.map
 dist/test/**
 node_modules/**
+**/target/**
+**/build/**
 *.vsix

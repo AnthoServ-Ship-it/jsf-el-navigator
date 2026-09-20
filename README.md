@@ -57,7 +57,8 @@ versión específica de PrimeFaces:
 - Selección de implementación cuando una interfaz tiene varios candidatos.
 - Selección de sobrecargas por cantidad y tipos inferidos de argumentos.
 - Métodos heredados y módulos hermanos dentro del agregador Maven o Gradle.
-- Vista previa, autocompletado y diagnósticos para referencias inexistentes.
+- JavaDoc, firma y clase propietaria al mantener `Ctrl` sobre un método navegable.
+- Vista previa y diagnósticos para referencias inexistentes.
 - `Shift+F12` para buscar usos XHTML y llamadas a servicios inyectados.
 - Índice en memoria independiente por módulo, con invalidación automática.
 - Procesamiento completamente local, sin telemetría ni envío de código fuente.

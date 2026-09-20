@@ -116,3 +116,23 @@ public class PagoController {
     assert.equal(target.service.qualifier, "pagoInternacional");
     assert.equal(target.service.typeName, "PagoService");
 });
+
+test("infiere variables en una sola pasada para seleccionar sobrecargas", () => {
+    const variableSource = `
+public class ClienteController {
+    @Inject
+    private ClienteService servicio;
+
+    public void buscar() {
+        String identificacion = "0102030405";
+        servicio.buscar(identificacion);
+    }
+}`;
+    const target = findJavaServiceTargetAt(
+        variableSource,
+        variableSource.lastIndexOf("buscar") + 2
+    );
+
+    assert.ok(target);
+    assert.deepEqual(target.argumentTypes, ["String"]);
+});

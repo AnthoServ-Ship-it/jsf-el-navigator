@@ -8,7 +8,6 @@ const CHAIN_REGEX = new RegExp(
 );
 const SEGMENT_REGEX = new RegExp(`(?:^|\\.)\\s*(${IDENTIFIER})(\\s*\\([^{}()]*\\))?`, "g");
 const EL_EXPRESSION_REGEX = /(?:#|\$)\{[^}]*\}/g;
-const IDENTIFIER_REGEX = new RegExp(IDENTIFIER, "g");
 const EL_KEYWORDS = new Set([
     "and",
     "div",
@@ -100,34 +99,64 @@ export function findElTargetAt(text: string, rawOffset: number): ElTarget | unde
  */
 export function findAllElTargets(text: string): ElTarget[] {
     const targets: ElTarget[] = [];
-    const visitedSegments = new Set<string>();
 
     EL_EXPRESSION_REGEX.lastIndex = 0;
     let expressionMatch: RegExpExecArray | null;
     while ((expressionMatch = EL_EXPRESSION_REGEX.exec(text)) !== null) {
         const expression = expressionMatch[0];
         const body = expression.slice(2, -1);
+        const searchableBody = maskStringLiterals(body);
         const bodyStart = expressionMatch.index + 2;
 
-        IDENTIFIER_REGEX.lastIndex = 0;
-        let identifierMatch: RegExpExecArray | null;
-        while ((identifierMatch = IDENTIFIER_REGEX.exec(body)) !== null) {
-            const absoluteOffset = bodyStart + identifierMatch.index;
-            const target = findElTargetAt(text, absoluteOffset);
-            if (!target || EL_KEYWORDS.has(target.beanName)) {
+        // Cada cadena se analiza una sola vez. La implementación anterior
+        // volvía a buscar la expresión completa por cada identificador y se
+        // volvía cuadrática en vistas XHTML grandes.
+        CHAIN_REGEX.lastIndex = 0;
+        let chainMatch: RegExpExecArray | null;
+        while ((chainMatch = CHAIN_REGEX.exec(searchableBody)) !== null) {
+            const segments = parseSegments(chainMatch[0], bodyStart + chainMatch.index);
+            if (segments.length === 0 || EL_KEYWORDS.has(segments[0].name)) {
                 continue;
             }
 
-            const selected = target.segments[target.selectedIndex];
-            const key = `${selected.start}:${selected.end}`;
-            if (!visitedSegments.has(key)) {
-                visitedSegments.add(key);
-                targets.push(target);
+            for (let selectedIndex = 0; selectedIndex < segments.length; selectedIndex += 1) {
+                targets.push({
+                    expressionStart: expressionMatch.index,
+                    expressionEnd: expressionMatch.index + expression.length,
+                    beanName: segments[0].name,
+                    segments,
+                    selectedIndex
+                });
             }
         }
     }
 
     return targets;
+}
+
+/** Oculta texto entre comillas conservando los offsets UTF-16 originales. */
+function maskStringLiterals(value: string): string {
+    const chars = value.split("");
+    let quote: '"' | "'" | undefined;
+    let escaped = false;
+
+    for (let index = 0; index < chars.length; index += 1) {
+        const character = chars[index];
+        if (quote) {
+            if (escaped) {
+                escaped = false;
+            } else if (character === "\\") {
+                escaped = true;
+            } else if (character === quote) {
+                quote = undefined;
+            }
+            chars[index] = " ";
+        } else if (character === '"' || character === "'") {
+            quote = character;
+            chars[index] = " ";
+        }
+    }
+    return chars.join("");
 }
 
 function parseSegments(chain: string, absoluteStart: number): ElSegment[] {

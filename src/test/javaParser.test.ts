@@ -98,7 +98,7 @@ test("registra la aridad de métodos sobrecargados", () => {
 
 test("analiza herencia e interfaces de una implementación", () => {
     const source = `
-        public class TurnoServiceImpl extends BaseService implements TurnoService, Serializable {
+        public class TurnoServiceImpl extends BaseService<Turno, Long> implements TurnoService, Serializable {
             public void guardar() {}
         }
     `;
@@ -106,4 +106,49 @@ test("analiza herencia e interfaces de una implementación", () => {
     assert.ok(bean);
     assert.equal(bean.superClassName, "BaseService");
     assert.deepEqual(bean.interfaceNames, ["TurnoService", "Serializable"]);
+});
+
+test("analiza métodos implícitamente públicos de una interfaz", () => {
+    const source = `
+        public interface TurnoService {
+            void guardar(Long empresa, String nombre);
+            List<String> buscar(Long empresa) throws ServicioException;
+        }
+    `;
+    const bean = parseJavaBean(source, true);
+    assert.ok(bean);
+    assert.equal(bean.typeKind, "interface");
+    assert.equal(bean.className, "TurnoService");
+    assert.deepEqual(
+        bean.members.map((method) => [method.name, method.parameterCount]),
+        [
+            ["guardar", 2],
+            ["buscar", 1]
+        ]
+    );
+    assert.deepEqual(bean.members[0].parameterTypes, ["Long", "String"]);
+});
+
+test("registra métodos privados, protegidos y de paquete para navegación Java local", () => {
+    const source = `
+        public class CajaController {
+            private void buscarSupervisor() throws EntidadNoEncontradaException {}
+            protected boolean validarSupervisor(Long id) { return true; }
+            String nombreSupervisor() { return ""; }
+        }
+    `;
+    const bean = parseJavaBean(source, true);
+    assert.ok(bean);
+
+    assert.deepEqual(
+        bean.members
+            .filter((member) => member.kind === "method")
+            .map((method) => [method.name, method.visibility]),
+        [
+            ["buscarSupervisor", "private"],
+            ["validarSupervisor", "protected"],
+            ["nombreSupervisor", "package"]
+        ]
+    );
+    assert.equal(findJavaMembers(bean, "buscarSupervisor", true).length, 0);
 });

@@ -7,6 +7,15 @@ const FIELD_INJECTION_ANNOTATION =
     /@(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*(?:EJB|Inject|Autowired|Resource)\b/;
 const CONSTRUCTOR_INJECTION_ANNOTATION = /@(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*(?:Inject|Autowired)\b/;
 const CLASS_DECLARATION = /\bclass\s+([A-Za-z_$][A-Za-z0-9_$]*)/;
+const VARIABLE_DECLARATION =
+    /(?:^|[;{}(),])\s*(?:(?:public|protected|private|static|final|volatile|transient)\s+)*([A-Za-z_$][A-Za-z0-9_$.]*(?:[ \t]*<[^;={}\r\n]+>)?(?:[ \t]*\[[ \t]*\])?)[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)\b(?![ \t]*\()/gm;
+
+interface VariableDeclaration {
+    offset: number;
+    typeName: string;
+}
+
+type VariableTypeIndex = Map<string, VariableDeclaration[]>;
 
 export interface InjectedJavaService {
     fieldName: string;
@@ -28,12 +37,18 @@ export interface JavaServiceTarget {
 
 /** Encuentra llamadas realizadas sobre campos de servicio inyectados. */
 export function findAllJavaServiceTargets(source: string): JavaServiceTarget[] {
-    const services = findInjectedServices(source);
+    // Enmascarar un documento crea una copia completa de su texto. Se hace una
+    // sola vez y se reutiliza en todas las fases del análisis.
+    const code = maskCommentsAndLiterals(source);
+    const services = findInjectedServices(source, code);
     if (services.size === 0) {
         return [];
     }
 
-    const code = maskCommentsAndLiterals(source);
+    // Antes se buscaba la declaración de cada argumento desde el inicio del
+    // archivo. Con muchas llamadas eso convertía el análisis en O(n²). Este
+    // índice se construye una vez y permite resolver cada variable localmente.
+    const variableTypes = indexVariableTypes(code);
     const targets: JavaServiceTarget[] = [];
     METHOD_CALL.lastIndex = 0;
 
@@ -66,7 +81,7 @@ export function findAllJavaServiceTargets(source: string): JavaServiceTarget[] {
             argumentCount: argumentExpressions.length,
             argumentExpressions,
             argumentTypes: argumentExpressions.map((expression) =>
-                inferArgumentType(expression, source.slice(0, callStart))
+                inferArgumentType(expression, variableTypes, callStart)
             ),
             receiverSpan: {
                 start: receiverStart,
@@ -137,7 +152,11 @@ function splitArguments(
     return argumentsList;
 }
 
-function inferArgumentType(expression: string, sourceBeforeCall: string): string | undefined {
+function inferArgumentType(
+    expression: string,
+    variableTypes: VariableTypeIndex,
+    callStart: number
+): string | undefined {
     const value = expression.trim();
     if (/^"(?:[^"\\]|\\.)*"$/.test(value)) return "String";
     if (/^'(?:[^'\\]|\\.)'$/.test(value)) return "char";
@@ -154,20 +173,42 @@ function inferArgumentType(expression: string, sourceBeforeCall: string): string
     if (enumType) return enumType;
 
     if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value)) {
-        const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const declaration = new RegExp(
-            `\\b([A-Za-z_$][A-Za-z0-9_$.]*(?:\\s*<[^;={}\\r\\n]+>)?(?:\\s*\\[\\s*\\])?)\\s+${escaped}\\b`,
-            "g"
-        );
-        let match: RegExpExecArray | null;
-        let typeName: string | undefined;
-        while ((match = declaration.exec(sourceBeforeCall)) !== null) {
-            typeName = simpleTypeName(match[1]);
+        const declarations = variableTypes.get(value);
+        if (!declarations) return undefined;
+        let low = 0;
+        let high = declarations.length - 1;
+        let nearest: VariableDeclaration | undefined;
+        while (low <= high) {
+            const middle = Math.floor((low + high) / 2);
+            const candidate = declarations[middle];
+            if (candidate.offset < callStart) {
+                nearest = candidate;
+                low = middle + 1;
+            } else {
+                high = middle - 1;
+            }
         }
-        return typeName;
+        return nearest?.typeName;
     }
 
     return undefined;
+}
+
+function indexVariableTypes(source: string): VariableTypeIndex {
+    const result: VariableTypeIndex = new Map();
+    VARIABLE_DECLARATION.lastIndex = 0;
+
+    let match: RegExpExecArray | null;
+    while ((match = VARIABLE_DECLARATION.exec(source)) !== null) {
+        const name = match[2];
+        const declarations = result.get(name) ?? [];
+        declarations.push({
+            offset: match.index + match[0].lastIndexOf(name),
+            typeName: simpleTypeName(match[1])
+        });
+        result.set(name, declarations);
+    }
+    return result;
 }
 
 /** Localiza la llamada de servicio cuyo método contiene el cursor. */
@@ -180,12 +221,15 @@ export function findJavaServiceTargetAt(
     );
 }
 
-function findInjectedServices(source: string): Map<string, InjectedJavaService> {
+function findInjectedServices(
+    source: string,
+    maskedSource: string
+): Map<string, InjectedJavaService> {
     const services = new Map<string, InjectedJavaService>();
     FIELD_DECLARATION.lastIndex = 0;
 
     let match: RegExpExecArray | null;
-    while ((match = FIELD_DECLARATION.exec(source)) !== null) {
+    while ((match = FIELD_DECLARATION.exec(maskedSource)) !== null) {
         const boundary = Math.max(
             source.lastIndexOf(";", match.index - 1),
             source.lastIndexOf("{", match.index - 1),
@@ -214,7 +258,7 @@ function findInjectedServices(source: string): Map<string, InjectedJavaService> 
         });
     }
 
-    addConstructorInjectedServices(source, services);
+    addConstructorInjectedServices(source, maskedSource, services);
 
     return services;
 }
@@ -225,9 +269,9 @@ function findInjectedServices(source: string): Map<string, InjectedJavaService> 
  */
 function addConstructorInjectedServices(
     source: string,
+    maskedSource: string,
     services: Map<string, InjectedJavaService>
 ): void {
-    const maskedSource = maskCommentsAndLiterals(source);
     const className = CLASS_DECLARATION.exec(maskedSource)?.[1];
     if (!className) {
         return;

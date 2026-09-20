@@ -1,13 +1,31 @@
 import { readFile } from "node:fs/promises";
 import * as vscode from "vscode";
-import { findJavaServiceTargetAt, type JavaServiceTarget } from "./javaServiceParser";
+import { type JavaServiceAnalysisCache } from "./javaServiceAnalysisCache";
+import { type JavaServiceTarget } from "./javaServiceParser";
+import { writeLog } from "./logging";
 import { parseJavaBean } from "./javaParser";
 import { findProjectRoot } from "./moduleResolver";
 import { type SourceSpan } from "./types";
 
 /** Navega desde una llamada de un controlador hacia el servicio EJB inyectado. */
-export class JavaServiceDefinitionProvider implements vscode.DefinitionProvider {
-    public constructor(private readonly output: vscode.OutputChannel) {}
+export class JavaServiceDefinitionProvider implements vscode.DefinitionProvider, vscode.Disposable {
+    private readonly classFiles = new Map<string, Promise<vscode.Uri[]>>();
+    private readonly implementationFiles = new Map<string, Promise<vscode.Uri[]>>();
+
+    public constructor(
+        private readonly output: vscode.OutputChannel,
+        private readonly analysis: JavaServiceAnalysisCache
+    ) {}
+
+    /** Descarta únicamente resultados de rutas cuando cambia el workspace. */
+    public invalidateWorkspaceCache(): void {
+        this.classFiles.clear();
+        this.implementationFiles.clear();
+    }
+
+    public dispose(): void {
+        this.invalidateWorkspaceCache();
+    }
 
     public provideDefinition(
         document: vscode.TextDocument,
@@ -30,14 +48,17 @@ export class JavaServiceDefinitionProvider implements vscode.DefinitionProvider 
             return undefined;
         }
 
-        const target = findJavaServiceTargetAt(document.getText(), document.offsetAt(position));
+        const target = this.analysis.findTargetAt(document, document.offsetAt(position));
         if (!target) {
             return undefined;
         }
 
         const projectRoot = await findProjectRoot(document.uri);
-        this.output.appendLine(
-            `[INFO] Resolviendo servicio ${target.service.fieldName}.${target.methodName} en ${projectRoot.fsPath}.`
+        writeLog(
+            this.output,
+            "debug",
+            `Resolviendo servicio ${target.service.fieldName}.${target.methodName} en ${projectRoot.fsPath}.`,
+            document.uri
         );
 
         const files = await this.findServiceFiles(projectRoot, target, token);
@@ -83,8 +104,11 @@ export class JavaServiceDefinitionProvider implements vscode.DefinitionProvider 
         }
 
         if (links.length === 0) {
-            this.output.appendLine(
-                `[INFO] No se encontró ${target.methodName} en el servicio ${target.service.typeName}.`
+            writeLog(
+                this.output,
+                "debug",
+                `No se encontró ${target.methodName} en el servicio ${target.service.typeName}.`,
+                document.uri
             );
         }
         return links.length > 0 ? links : undefined;
@@ -146,15 +170,59 @@ export class JavaServiceDefinitionProvider implements vscode.DefinitionProvider 
         return this.findClassFiles(projectRoot, target.service.typeName);
     }
 
-    private findClassFiles(projectRoot: vscode.Uri, className: string): Thenable<vscode.Uri[]> {
+    private async findClassFiles(
+        projectRoot: vscode.Uri,
+        className: string
+    ): Promise<vscode.Uri[]> {
         const simpleName = className.slice(className.lastIndexOf(".") + 1);
-        return vscode.workspace.findFiles(
-            new vscode.RelativePattern(projectRoot, `**/src/main/java/**/${simpleName}.java`),
-            "**/{target,build,node_modules,.git}/**"
-        );
+        const key = `${projectRoot.toString()}#${simpleName}`;
+        let lookup = this.classFiles.get(key);
+        if (!lookup) {
+            lookup = (async () => {
+                const projectFiles = await vscode.workspace.findFiles(
+                    new vscode.RelativePattern(
+                        projectRoot,
+                        `**/src/main/java/**/${simpleName}.java`
+                    ),
+                    "**/{target,build,node_modules,.git}/**"
+                );
+                if (projectFiles.length > 0) return projectFiles;
+
+                // Algunos EJB viven en proyectos hermanos del mismo workspace
+                // (por ejemplo entidades-servicios fuera del agregador web).
+                return vscode.workspace.findFiles(
+                    `**/src/main/java/**/${simpleName}.java`,
+                    "**/{target,build,node_modules,.git}/**"
+                );
+            })();
+            this.classFiles.set(key, lookup);
+        }
+        return lookup;
     }
 
     private async findImplementations(
+        projectRoot: vscode.Uri,
+        interfaceName: string,
+        qualifier: string | undefined,
+        token: vscode.CancellationToken
+    ): Promise<vscode.Uri[]> {
+        const cacheKey = `${projectRoot.toString()}#${interfaceName}#${qualifier ?? ""}`;
+        const cached = this.implementationFiles.get(cacheKey);
+        if (cached) return cached;
+
+        const lookup = this.scanImplementations(projectRoot, interfaceName, qualifier, token);
+        this.implementationFiles.set(cacheKey, lookup);
+        try {
+            const result = await lookup;
+            if (token.isCancellationRequested) this.implementationFiles.delete(cacheKey);
+            return result;
+        } catch (error) {
+            this.implementationFiles.delete(cacheKey);
+            throw error;
+        }
+    }
+
+    private async scanImplementations(
         projectRoot: vscode.Uri,
         interfaceName: string,
         qualifier: string | undefined,
@@ -166,12 +234,22 @@ export class JavaServiceDefinitionProvider implements vscode.DefinitionProvider 
         );
         const matches: Array<{ uri: vscode.Uri; source: string }> = [];
 
-        for (const uri of javaFiles) {
-            if (token.isCancellationRequested) {
-                return [];
-            }
-            try {
-                const source = await readSource(uri);
+        for (let start = 0; start < javaFiles.length; start += 32) {
+            if (token.isCancellationRequested) return [];
+            const batch = javaFiles.slice(start, start + 32);
+            const sources = await Promise.all(
+                batch.map(async (uri) => {
+                    try {
+                        return { uri, source: await readSource(uri) };
+                    } catch {
+                        return undefined;
+                    }
+                })
+            );
+
+            for (const item of sources) {
+                if (!item || token.isCancellationRequested) continue;
+                const { uri, source } = item;
                 const parsed = parseJavaBean(source, true);
                 if (
                     parsed?.interfaceNames.some(
@@ -180,8 +258,6 @@ export class JavaServiceDefinitionProvider implements vscode.DefinitionProvider 
                 ) {
                     matches.push({ uri, source });
                 }
-            } catch {
-                // Un archivo ilegible no debe bloquear la navegación del resto.
             }
         }
 

@@ -2,14 +2,26 @@ import { type JavaMember, type ParsedJavaBean } from "./types";
 
 const BEAN_ANNOTATION =
     /@(?:(?:javax|jakarta|org\.springframework)\.[A-Za-z0-9_.]+\.)?(Named|ManagedBean|Controller|Component)\b(?:\s*\(([\s\S]*?)\))?/g;
-const CLASS_DECLARATION =
-    /\b(?:public\s+)?(?:(?:abstract|final)\s+)*class\s+([A-Za-z_$][A-Za-z0-9_$]*)/;
+const TYPE_DECLARATION =
+    /\b(?:public\s+)?(?:(?:abstract|final|sealed|non-sealed)\s+)*(class|interface)\s+([A-Za-z_$][A-Za-z0-9_$]*)/;
 const CLASS_RELATIONS =
-    /\bclass\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\s+extends\s+([A-Za-z_$][A-Za-z0-9_$.]*))?(?:\s+implements\s+([^{]+))?\s*\{/;
+    /\bclass\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\s+extends\s+([A-Za-z_$][A-Za-z0-9_$.]*(?:\s*<[^{}]+?>)?))?(?:\s+implements\s+([^{]+))?\s*\{/;
 const METHOD_DECLARATION =
-    /\bpublic\s+(?:(?:static|final|synchronized|abstract|native|default|strictfp)\s+)*(?:<[^>{};]+>\s+)?([A-Za-z_$][A-Za-z0-9_$.[\]<>?, \t]*)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+    /\b(?:(public|protected|private)\s+)?(?:(?:static|final|synchronized|abstract|native|default|strictfp)\s+)*(?:<[^>{};]+>\s+)?([A-Za-z_$][A-Za-z0-9_$.[\]<>?, \t]*)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+const INTERFACE_METHOD_DECLARATION =
+    /\b(?:(public|protected|private)\s+)?(?:(?:static|abstract|default|strictfp)\s+)*(?:<[^>{};]+>\s+)?([A-Za-z_$][A-Za-z0-9_$.[\]<>?, \t]*)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
 const FIELD_DECLARATION =
     /\b(?:private|protected|public)\s+(?:(?:static|final|transient|volatile)\s+)*([A-Za-z_$][A-Za-z0-9_$.[\]<>?, \t]*)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:=|;)/g;
+const NON_TYPE_KEYWORDS = new Set([
+    "return",
+    "throw",
+    "new",
+    "if",
+    "for",
+    "while",
+    "switch",
+    "catch"
+]);
 
 /**
  * Analizador deliberadamente ligero para controladores JSF convencionales.
@@ -20,13 +32,14 @@ export function parseJavaBean(
     includeImplicitClass = false
 ): ParsedJavaBean | undefined {
     const cleanSource = maskComments(source);
-    const classMatch = CLASS_DECLARATION.exec(cleanSource);
+    const classMatch = TYPE_DECLARATION.exec(cleanSource);
 
     if (!classMatch) {
         return undefined;
     }
 
-    const className = classMatch[1];
+    const typeKind = classMatch[1] as "class" | "interface";
+    const className = classMatch[2];
     const classNameOffset = classMatch.index + classMatch[0].lastIndexOf(className);
     const annotationsArea = cleanSource.slice(0, classMatch.index);
     const declaredBeanNames = extractBeanNames(annotationsArea, className);
@@ -44,20 +57,24 @@ export function parseJavaBean(
     const relations = CLASS_RELATIONS.exec(cleanSource);
 
     return {
+        typeKind,
         beanNames,
         className,
         classSpan: {
             start: classNameOffset,
             end: classNameOffset + className.length
         },
-        superClassName: relations?.[1],
+        superClassName: relations?.[1] ? normalizeType(relations[1]) : undefined,
         interfaceNames: relations?.[2]
-            ? relations[2]
-                  .split(",")
+            ? splitTopLevel(relations[2])
                   .map((name) => name.trim())
+                  .map(normalizeType)
                   .filter(Boolean)
             : [],
-        members: [...extractMethods(cleanSource), ...extractFields(cleanSource)]
+        members: [
+            ...extractMethods(cleanSource, typeKind === "interface"),
+            ...extractFields(cleanSource)
+        ]
     };
 }
 
@@ -71,7 +88,10 @@ export function findJavaMembers(
     invoked: boolean
 ): JavaMember[] {
     const methods = bean.members.filter(
-        (member) => member.kind === "method" && member.name === requestedName
+        (member) =>
+            member.kind === "method" &&
+            member.visibility === "public" &&
+            member.name === requestedName
     );
 
     if (invoked) {
@@ -79,7 +99,10 @@ export function findJavaMembers(
     }
 
     const getters = bean.members.filter(
-        (member) => member.kind === "method" && member.propertyName === requestedName
+        (member) =>
+            member.kind === "method" &&
+            member.visibility === "public" &&
+            member.propertyName === requestedName
     );
     if (getters.length > 0) {
         return getters;
@@ -113,17 +136,28 @@ function extractBeanNames(annotationsArea: string, className: string): string[] 
     return [...names];
 }
 
-function extractMethods(source: string): JavaMember[] {
+function extractMethods(source: string, includeImplicitInterfaceMethods: boolean): JavaMember[] {
     const members: JavaMember[] = [];
-    METHOD_DECLARATION.lastIndex = 0;
+    const declarationPattern = includeImplicitInterfaceMethods
+        ? INTERFACE_METHOD_DECLARATION
+        : METHOD_DECLARATION;
+    declarationPattern.lastIndex = 0;
 
     let match: RegExpExecArray | null;
-    while ((match = METHOD_DECLARATION.exec(source)) !== null) {
-        const returnType = match[1].trim();
-        const name = match[2];
+    while ((match = declarationPattern.exec(source)) !== null) {
+        const declaredVisibility = match[1] as "public" | "protected" | "private" | undefined;
+        const returnType = match[2].trim();
+        const name = match[3];
         const start = match.index + match[0].lastIndexOf(name);
         const openParenthesis = match.index + match[0].lastIndexOf("(");
         const closeParenthesis = findClosingParenthesis(source, openParenthesis);
+        if (
+            isNonTypeKeyword(returnType) ||
+            closeParenthesis < 0 ||
+            !hasMethodDeclarationTerminator(source, closeParenthesis)
+        ) {
+            continue;
+        }
         const parameterCount =
             closeParenthesis >= 0
                 ? countParameters(source.slice(openParenthesis + 1, closeParenthesis))
@@ -139,6 +173,8 @@ function extractMethods(source: string): JavaMember[] {
             returnType,
             parameterCount,
             parameterTypes,
+            visibility:
+                declaredVisibility ?? (includeImplicitInterfaceMethods ? "public" : "package"),
             propertyName: propertyNameFromAccessor(name),
             span: {
                 start,
@@ -148,6 +184,15 @@ function extractMethods(source: string): JavaMember[] {
     }
 
     return members;
+}
+
+function isNonTypeKeyword(value: string): boolean {
+    return NON_TYPE_KEYWORDS.has(value);
+}
+
+function hasMethodDeclarationTerminator(source: string, closeParenthesis: number): boolean {
+    const tail = source.slice(closeParenthesis + 1);
+    return /^\s*(?:throws\s+[A-Za-z0-9_$.,<>?[\]\s]+)?\s*[;{]/.test(tail);
 }
 
 function extractParameterTypes(parameters: string): string[] {

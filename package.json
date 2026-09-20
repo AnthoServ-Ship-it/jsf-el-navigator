@@ -2,7 +2,7 @@
     "name": "jsf-el-navigator",
     "displayName": "JSF EL Navigator",
     "description": "Navega JSF/PrimeFaces EL: XHTML → Java → servicios inyectados. Navigate JSF EL definitions in VS Code.",
-    "version": "0.4.0",
+    "version": "0.4.19",
     "publisher": "anthoserv",
     "author": {
         "name": "anthoserv"
@@ -50,14 +50,14 @@
         "workspace"
     ],
     "activationEvents": [
-        "onLanguage:html",
-        "onLanguage:xml",
+        "workspaceContains:**/*.xhtml",
         "onLanguage:xhtml",
         "onLanguage:java",
         "onCommand:jsfElNavigator.goToDefinition",
         "onCommand:jsfElNavigator.goToDefinitionAt",
         "onCommand:jsfElNavigator.goToServiceDefinition",
         "onCommand:jsfElNavigator.goToServiceDefinitionAt",
+        "onCommand:jsfElNavigator.goToInterfaceImplementationAt",
         "onCommand:jsfElNavigator.rebuildIndex",
         "onCommand:jsfElNavigator.showDiagnostics"
     ],
@@ -76,7 +76,7 @@
             },
             {
                 "command": "jsfElNavigator.goToServiceDefinition",
-                "title": "Ir a la implementación del servicio",
+                "title": "Ir a la interfaz o implementación",
                 "category": "JSF EL Navigator"
             },
             {
@@ -90,6 +90,11 @@
                 "command": "jsfElNavigator.goToDefinition",
                 "key": "f12",
                 "when": "editorTextFocus && resourceExtname == .xhtml"
+            },
+            {
+                "command": "jsfElNavigator.goToServiceDefinition",
+                "key": "f12",
+                "when": "editorTextFocus && editorLangId == java"
             }
         ],
         "menus": {
@@ -112,21 +117,25 @@
                 "jsfElNavigator.enabled": {
                     "type": "boolean",
                     "default": true,
+                    "scope": "resource",
                     "description": "Activa la navegación desde expresiones EL en archivos XHTML hacia código Java."
                 },
                 "jsfElNavigator.javaServiceNavigation.enabled": {
                     "type": "boolean",
                     "default": true,
+                    "scope": "resource",
                     "description": "Activa Ctrl+clic desde llamadas Java de controladores hacia servicios @EJB, @Inject o @Autowired."
                 },
                 "jsfElNavigator.diagnostics.enabled": {
                     "type": "boolean",
-                    "default": true,
+                    "default": false,
+                    "scope": "resource",
                     "description": "Marca en XHTML los beans y miembros Java que no se encuentran en el módulo actual."
                 },
                 "jsfElNavigator.additionalJavaSourceRoots": {
                     "type": "array",
                     "default": [],
+                    "scope": "resource",
                     "items": {
                         "type": "string"
                     },
@@ -134,13 +143,14 @@
                 },
                 "jsfElNavigator.logging": {
                     "type": "string",
-                    "default": "info",
+                    "default": "off",
+                    "scope": "resource",
                     "enum": [
                         "off",
                         "info",
                         "debug"
                     ],
-                    "description": "Nivel de detalle del canal de salida de JSF EL Navigator."
+                    "description": "Nivel de detalle del canal de salida. Déjalo desactivado para evitar trabajo y mensajes durante hover."
                 }
             }
         }

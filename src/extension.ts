@@ -1,13 +1,23 @@
 import * as vscode from "vscode";
 import { BeanIndex } from "./beanIndex";
+import { ElAnalysisCache } from "./elAnalysisCache";
 import { JsfElDefinitionProvider } from "./definitionProvider";
 import { JsfElDocumentLinkProvider } from "./documentLinkProvider";
+import { JavaServiceAnalysisCache } from "./javaServiceAnalysisCache";
 import { JavaServiceDefinitionProvider } from "./javaServiceDefinitionProvider";
 import { JavaServiceDocumentLinkProvider } from "./javaServiceDocumentLinkProvider";
+import { JavaInterfaceImplementationProvider } from "./javaInterfaceImplementationProvider";
+import { JavaInterfaceDocumentLinkProvider } from "./javaInterfaceDocumentLinkProvider";
+import { JavaTypeAnalysisCache } from "./javaTypeAnalysisCache";
+import { JavaLocalMethodDefinitionProvider } from "./javaLocalMethodDefinitionProvider";
+import { JavaLocalMethodDocumentLinkProvider } from "./javaLocalMethodDocumentLinkProvider";
+import { JavaTypeDefinitionProvider } from "./javaTypeDefinitionProvider";
+import { JavaTypeDocumentLinkProvider } from "./javaTypeDocumentLinkProvider";
+import { writeLog } from "./logging";
 import { JsfElCompletionProvider } from "./completionProvider";
 import { JsfElDiagnostics } from "./diagnostics";
-import { DefinitionHoverProvider } from "./hoverProvider";
 import { JsfJavaReferenceProvider } from "./referenceProvider";
+import { ResourceBundleResolver } from "./resourceBundleResolver";
 
 interface DefinitionResolver {
     resolve(
@@ -21,12 +31,43 @@ interface DefinitionResolver {
 export function activate(context: vscode.ExtensionContext): void {
     const output = vscode.window.createOutputChannel("JSF EL Navigator");
     const index = new BeanIndex(output);
-    const definitionProvider = new JsfElDefinitionProvider(index, output);
-    const documentLinkProvider = new JsfElDocumentLinkProvider();
-    const javaServiceProvider = new JavaServiceDefinitionProvider(output);
-    const javaServiceLinkProvider = new JavaServiceDocumentLinkProvider();
-    const completionProvider = new JsfElCompletionProvider(index);
-    const diagnostics = new JsfElDiagnostics(index);
+    const elAnalysis = new ElAnalysisCache();
+    const resourceBundles = new ResourceBundleResolver();
+    const definitionProvider = new JsfElDefinitionProvider(
+        index,
+        output,
+        elAnalysis,
+        resourceBundles
+    );
+    const documentLinkProvider = new JsfElDocumentLinkProvider(elAnalysis, definitionProvider);
+    const javaServiceAnalysis = new JavaServiceAnalysisCache();
+    const javaTypeAnalysis = new JavaTypeAnalysisCache();
+    const javaServiceProvider = new JavaServiceDefinitionProvider(output, javaServiceAnalysis);
+    const javaInterfaceProvider = new JavaInterfaceImplementationProvider(javaTypeAnalysis);
+    const javaLocalMethodProvider = new JavaLocalMethodDefinitionProvider(javaTypeAnalysis);
+    const javaTypeProvider = new JavaTypeDefinitionProvider();
+    const javaTypeLinkProvider = new JavaTypeDocumentLinkProvider(javaTypeProvider);
+    const javaLocalMethodLinkProvider = new JavaLocalMethodDocumentLinkProvider(javaTypeAnalysis);
+    const javaNavigationProvider: DefinitionResolver = {
+        async resolve(document, position, token) {
+            return (
+                (await javaLocalMethodProvider.resolve(document, position, token)) ??
+                (await javaTypeProvider.resolve(document, position, token)) ??
+                (await javaServiceProvider.resolve(document, position, token)) ??
+                javaInterfaceProvider.resolve(document, position, token)
+            );
+        }
+    };
+    const javaServiceLinkProvider = new JavaServiceDocumentLinkProvider(
+        javaServiceAnalysis,
+        javaServiceProvider
+    );
+    const javaInterfaceLinkProvider = new JavaInterfaceDocumentLinkProvider(
+        javaTypeAnalysis,
+        javaInterfaceProvider
+    );
+    const completionProvider = new JsfElCompletionProvider(index, resourceBundles);
+    const diagnostics = new JsfElDiagnostics(index, elAnalysis);
     const referenceProvider = new JsfJavaReferenceProvider();
 
     // El patrón garantiza soporte para .xhtml aunque el usuario lo tenga asociado
@@ -81,16 +122,31 @@ export function activate(context: vscode.ExtensionContext): void {
         }
     );
 
-    const goToServiceDefinitionCommand = vscode.commands.registerTextEditorCommand(
-        "jsfElNavigator.goToServiceDefinition",
-        (editor) =>
-            navigateToDefinition(
-                javaServiceProvider,
+    const goToInterfaceImplementationAtCommand = vscode.commands.registerCommand(
+        "jsfElNavigator.goToInterfaceImplementationAt",
+        async (documentUri: string, offset: number) => {
+            const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(documentUri));
+            await navigateToDefinition(
+                javaInterfaceProvider,
                 output,
+                document,
+                document.positionAt(offset),
+                "JSF EL Navigator: no se encontró la interfaz o implementación relacionada."
+            );
+        }
+    );
+
+    const goToServiceDefinitionCommand = vscode.commands.registerCommand(
+        "jsfElNavigator.goToServiceDefinition",
+        async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) return;
+            await navigateJavaOrDefault(
+                javaNavigationProvider,
                 editor.document,
-                editor.selection.active,
-                "JSF EL Navigator: no se encontró el método del servicio. Revisa el canal de salida."
-            )
+                editor.selection.active
+            );
+        }
     );
 
     const rebuildCommand = vscode.commands.registerCommand(
@@ -125,31 +181,61 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         output,
         index,
+        elAnalysis,
+        resourceBundles,
+        javaServiceAnalysis,
+        javaTypeAnalysis,
+        javaServiceProvider,
+        javaServiceLinkProvider,
+        javaInterfaceProvider,
+        javaTypeProvider,
         diagnostics,
         goToDefinitionCommand,
         goToDefinitionAtCommand,
         goToServiceDefinitionCommand,
         goToServiceDefinitionAtCommand,
+        goToInterfaceImplementationAtCommand,
         rebuildCommand,
         diagnosticsCommand,
         vscode.languages.registerDefinitionProvider(selector, definitionProvider),
         vscode.languages.registerDocumentLinkProvider(selector, documentLinkProvider),
-        vscode.languages.registerHoverProvider(
-            selector,
-            new DefinitionHoverProvider(definitionProvider, "Definición JSF/Java")
-        ),
         vscode.languages.registerCompletionItemProvider(selector, completionProvider, ".", "{"),
         vscode.languages.registerDefinitionProvider(javaSelector, javaServiceProvider),
+        vscode.languages.registerDefinitionProvider(javaSelector, javaLocalMethodProvider),
+        vscode.languages.registerDefinitionProvider(javaSelector, javaTypeProvider),
+        vscode.languages.registerDefinitionProvider(javaSelector, javaInterfaceProvider),
+        vscode.languages.registerImplementationProvider(javaSelector, javaInterfaceProvider),
         vscode.languages.registerDocumentLinkProvider(javaSelector, javaServiceLinkProvider),
-        vscode.languages.registerHoverProvider(
-            javaSelector,
-            new DefinitionHoverProvider(javaServiceProvider, "Implementación del servicio")
-        ),
+        vscode.languages.registerDocumentLinkProvider(javaSelector, javaLocalMethodLinkProvider),
+        vscode.languages.registerDocumentLinkProvider(javaSelector, javaTypeLinkProvider),
+        vscode.languages.registerDocumentLinkProvider(javaSelector, javaInterfaceLinkProvider),
         vscode.languages.registerReferenceProvider(javaSelector, referenceProvider)
     );
 
     const version = String(context.extension.packageJSON.version ?? "desconocida");
-    output.appendLine(`JSF EL Navigator ${version} activado.`);
+    writeLog(output, "debug", `JSF EL Navigator ${version} activado.`);
+}
+
+async function navigateJavaOrDefault(
+    definitionProvider: DefinitionResolver,
+    document: vscode.TextDocument,
+    position: vscode.Position
+): Promise<void> {
+    const cancellation = new vscode.CancellationTokenSource();
+    try {
+        const links = await definitionProvider.resolve(document, position, cancellation.token);
+        if (links && links.length > 0) {
+            const selectedLink = links.length === 1 ? links[0] : await selectDefinition(links);
+            if (selectedLink) {
+                await openDefinition(selectedLink);
+            }
+            return;
+        }
+    } finally {
+        cancellation.dispose();
+    }
+
+    await vscode.commands.executeCommand("editor.action.revealDefinition");
 }
 
 export function deactivate(): void {

@@ -8,9 +8,13 @@ interface ExtensionManifest {
     publisher: string;
     version: string;
     main: string;
+    activationEvents?: string[];
     repository?: { url?: string };
     bugs?: { url?: string };
-    contributes?: { commands?: Array<{ command: string }> };
+    contributes?: {
+        commands?: Array<{ command: string }>;
+        keybindings?: Array<{ command: string; key: string; when?: string }>;
+    };
 }
 
 test("el manifiesto contiene la identidad y los comandos públicos de anthoserv", async () => {
@@ -29,4 +33,15 @@ test("el manifiesto contiene la identidad y los comandos públicos de anthoserv"
     assert.ok(commands.has("jsfElNavigator.goToDefinition"));
     assert.ok(commands.has("jsfElNavigator.goToServiceDefinition"));
     assert.ok(commands.has("jsfElNavigator.rebuildIndex"));
+    assert.ok(manifest.activationEvents?.includes("workspaceContains:**/*.xhtml"));
+    assert.ok(manifest.activationEvents?.includes("onLanguage:java"));
+    assert.equal(manifest.activationEvents?.includes("onLanguage:html"), false);
+    assert.equal(manifest.activationEvents?.includes("onLanguage:xml"), false);
+    assert.equal(
+        manifest.contributes?.keybindings?.some(
+            (binding) => binding.key.toLowerCase() === "f12" && binding.when?.includes("java")
+        ),
+        true,
+        "La extensión debe ofrecer F12 directo en Java"
+    );
 });

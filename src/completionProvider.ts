@@ -1,9 +1,13 @@
 import * as vscode from "vscode";
 import { type BeanIndex } from "./beanIndex";
+import { type ResourceBundleResolver } from "./resourceBundleResolver";
 
 /** Autocompleta nombres de beans y miembros Java dentro de expresiones EL. */
 export class JsfElCompletionProvider implements vscode.CompletionItemProvider {
-    public constructor(private readonly index: BeanIndex) {}
+    public constructor(
+        private readonly index: BeanIndex,
+        private readonly resourceBundles: ResourceBundleResolver
+    ) {}
 
     public async provideCompletionItems(
         document: vscode.TextDocument,
@@ -35,6 +39,12 @@ export class JsfElCompletionProvider implements vscode.CompletionItemProvider {
         );
         if (!member) {
             return undefined;
+        }
+
+        // Los resource bundles solo ofrecen navegación. No enumeramos cientos de claves
+        // ni intentamos tratarlos como beans Java al escribir, para mantener el editor ágil.
+        if (await this.resourceBundles.isBundleVariable(document, member[1], token)) {
+            return [];
         }
 
         const beans = await this.index.findBeans(document.uri, member[1], token);

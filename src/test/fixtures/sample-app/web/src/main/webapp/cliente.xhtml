@@ -3,6 +3,10 @@
       xmlns:h="http://xmlns.jcp.org/jsf/html"
       xmlns:p="http://primefaces.org/ui">
 <h:body>
+    <h:outputText value="#{lbl.cliente}" />
     <p:commandButton value="Guardar" action="#{clienteController.guardar()}" />
+    <p:dataTable var="item" value="#{clienteController.filas}">
+        <h:outputText value="#{item.tickets.showFactura}" />
+    </p:dataTable>
 </h:body>
 </html>
