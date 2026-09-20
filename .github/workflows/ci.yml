@@ -41,7 +41,7 @@ jobs:
               run: npm run package
 
             - name: Guardar VSIX
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: jsf-el-navigator-vsix
                   path: "*.vsix"
