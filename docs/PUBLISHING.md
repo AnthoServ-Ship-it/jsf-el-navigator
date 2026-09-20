@@ -35,7 +35,30 @@ El archivo resultante será `jsf-el-navigator-<versión>.vsix`.
 4. Publica el VSIX validado:
 
     ```bash
-    npx vsce publish --packagePath jsf-el-navigator-0.3.1.vsix
+    npx vsce publish --packagePath jsf-el-navigator-0.4.0.vsix
     ```
 
 Nunca agregues tokens, contraseñas ni archivos `.env` al repositorio.
+
+## 4. Publicación automatizada por etiqueta
+
+El workflow `.github/workflows/release.yml` valida, prueba, empaqueta, publica en
+Marketplace y crea una versión descargable en GitHub.
+
+Configura una sola vez el secreto `VSCE_PAT` en:
+
+```text
+GitHub → Settings → Secrets and variables → Actions → New repository secret
+```
+
+Después actualiza `package.json` y `CHANGELOG.md`, confirma los cambios y crea una
+etiqueta que coincida exactamente con la versión:
+
+```bash
+git tag v0.4.0
+git push origin master
+git push origin v0.4.0
+```
+
+No reutilices etiquetas y no guardes el PAT en archivos, comandos versionados ni
+capturas de pantalla.

@@ -3,13 +3,17 @@ import { type SourceSpan } from "./types";
 const FIELD_DECLARATION =
     /\b(?:private|protected|public)[ \t]+(?:(?:static|final|transient|volatile)[ \t]+)*([A-Za-z_$][A-Za-z0-9_$.]*(?:[ \t]*<[^;={}\r\n]+>)?(?:[ \t]*\[[ \t]*\])?)[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)[ \t]*(?:=[^;\r\n]*)?;/g;
 const METHOD_CALL = /\b([A-Za-z_$][A-Za-z0-9_$]*)[ \t]*\.[ \t]*([A-Za-z_$][A-Za-z0-9_$]*)[ \t]*\(/g;
-const INJECTION_ANNOTATION = /@(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*(?:EJB|Inject|Autowired)\b/;
+const FIELD_INJECTION_ANNOTATION =
+    /@(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*(?:EJB|Inject|Autowired|Resource)\b/;
+const CONSTRUCTOR_INJECTION_ANNOTATION = /@(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*(?:Inject|Autowired)\b/;
+const CLASS_DECLARATION = /\bclass\s+([A-Za-z_$][A-Za-z0-9_$]*)/;
 
 export interface InjectedJavaService {
     fieldName: string;
     typeName: string;
     implementationClass?: string;
     interfaceName?: string;
+    qualifier?: string;
 }
 
 export interface JavaServiceTarget {
@@ -188,7 +192,7 @@ function findInjectedServices(source: string): Map<string, InjectedJavaService> 
             source.lastIndexOf("}", match.index - 1)
         );
         const annotations = source.slice(boundary + 1, match.index);
-        if (!INJECTION_ANNOTATION.test(annotations)) {
+        if (!FIELD_INJECTION_ANNOTATION.test(annotations)) {
             continue;
         }
 
@@ -205,11 +209,146 @@ function findInjectedServices(source: string): Map<string, InjectedJavaService> 
             fieldName,
             typeName,
             implementationClass: beanName || undefined,
-            interfaceName: lookupParts?.[1]
+            interfaceName: lookupParts?.[1],
+            qualifier: extractQualifier(annotations)
         });
     }
 
+    addConstructorInjectedServices(source, services);
+
     return services;
+}
+
+/**
+ * Registra dependencias asignadas por un constructor anotado. Se conserva el
+ * nombre real del campo para reconocer llamadas posteriores como servicio.metodo().
+ */
+function addConstructorInjectedServices(
+    source: string,
+    services: Map<string, InjectedJavaService>
+): void {
+    const maskedSource = maskCommentsAndLiterals(source);
+    const className = CLASS_DECLARATION.exec(maskedSource)?.[1];
+    if (!className) {
+        return;
+    }
+
+    const escapedClassName = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const constructorPattern = new RegExp(
+        `\\b(?:public|protected|private)?\\s*${escapedClassName}\\s*\\(`,
+        "g"
+    );
+    let constructorMatch: RegExpExecArray | null;
+
+    while ((constructorMatch = constructorPattern.exec(maskedSource)) !== null) {
+        const boundary = Math.max(
+            source.lastIndexOf(";", constructorMatch.index - 1),
+            source.lastIndexOf("{", constructorMatch.index - 1),
+            source.lastIndexOf("}", constructorMatch.index - 1)
+        );
+        const annotations = source.slice(boundary + 1, constructorMatch.index);
+        if (!CONSTRUCTOR_INJECTION_ANNOTATION.test(annotations)) {
+            continue;
+        }
+
+        const openParenthesis = constructorMatch.index + constructorMatch[0].lastIndexOf("(");
+        const closeParenthesis = findClosingParenthesis(maskedSource, openParenthesis);
+        if (closeParenthesis < 0) {
+            continue;
+        }
+
+        const bodyStart = maskedSource.indexOf("{", closeParenthesis);
+        const bodyEnd = bodyStart >= 0 ? findClosingBrace(maskedSource, bodyStart) : -1;
+        const body = bodyEnd >= 0 ? source.slice(bodyStart + 1, bodyEnd) : "";
+
+        for (const parameter of splitParameterDeclarations(
+            source.slice(openParenthesis + 1, closeParenthesis)
+        )) {
+            const assignmentPattern = new RegExp(
+                `\\bthis\\s*\\.\\s*([A-Za-z_$][A-Za-z0-9_$]*)\\s*=\\s*${escapeRegExp(parameter.name)}\\s*;`
+            );
+            const fieldName = assignmentPattern.exec(body)?.[1] ?? parameter.name;
+            services.set(fieldName, {
+                fieldName,
+                typeName: parameter.typeName,
+                qualifier: parameter.qualifier
+            });
+        }
+    }
+}
+
+function splitParameterDeclarations(
+    parameters: string
+): Array<{ name: string; typeName: string; qualifier?: string }> {
+    if (parameters.trim().length === 0) {
+        return [];
+    }
+
+    return splitTopLevel(parameters).flatMap((parameter) => {
+        const qualifier = extractQualifier(parameter);
+        const cleanParameter = parameter
+            .replace(/@[A-Za-z_$][A-Za-z0-9_$.]*(?:\s*\([^)]*\))?\s*/g, "")
+            .replace(/\bfinal\s+/g, "")
+            .trim();
+        const declaration = /^(.*?)(?:\s+|\.\.\.\s*)([A-Za-z_$][A-Za-z0-9_$]*)$/.exec(
+            cleanParameter
+        );
+        if (!declaration) {
+            return [];
+        }
+        return [
+            {
+                typeName: simpleTypeName(declaration[1]),
+                name: declaration[2],
+                qualifier
+            }
+        ];
+    });
+}
+
+function splitTopLevel(value: string): string[] {
+    const values: string[] = [];
+    let start = 0;
+    let angle = 0;
+    let parentheses = 0;
+    for (let index = 0; index < value.length; index += 1) {
+        const character = value[index];
+        if (character === "<") angle += 1;
+        else if (character === ">") angle = Math.max(0, angle - 1);
+        else if (character === "(") parentheses += 1;
+        else if (character === ")") parentheses -= 1;
+        else if (character === "," && angle === 0 && parentheses === 0) {
+            values.push(value.slice(start, index).trim());
+            start = index + 1;
+        }
+    }
+    values.push(value.slice(start).trim());
+    return values;
+}
+
+function findClosingBrace(source: string, openBrace: number): number {
+    let depth = 0;
+    for (let index = openBrace; index < source.length; index += 1) {
+        if (source[index] === "{") {
+            depth += 1;
+        } else if (source[index] === "}") {
+            depth -= 1;
+            if (depth === 0) {
+                return index;
+            }
+        }
+    }
+    return -1;
+}
+
+function extractQualifier(annotations: string): string | undefined {
+    return /@(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*(?:Qualifier|Named|Resource)\s*\(\s*(?:name\s*=\s*)?"([A-Za-z_$][A-Za-z0-9_$.-]*)"/.exec(
+        annotations
+    )?.[1];
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function simpleTypeName(rawType: string): string {

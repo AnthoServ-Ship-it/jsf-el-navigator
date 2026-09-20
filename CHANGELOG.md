@@ -1,5 +1,17 @@
 # Registro de cambios
 
+## 0.4.0
+
+- Soporte para servicios inyectados mediante `@Resource`.
+- Navegación para inyección por constructor con `@Inject` y `@Autowired`.
+- Resolución por calificadores `@Qualifier`, `@Named` y `@Resource(name = ...)`.
+- Selección de destino cuando una interfaz posee varias implementaciones.
+- Búsqueda de implementaciones con nombres diferentes a la convención `InterfazImpl`.
+- Proyecto demostrativo Maven para el recorrido XHTML → controlador → servicio.
+- Presentación bilingüe, demostración animada y palabras clave internacionales.
+- Validación continua en Linux, Windows y macOS.
+- Publicación automatizada y reproducible mediante etiquetas Git.
+
 ## 0.3.1
 
 - Se incorpora validación automática de tipos, estilo, pruebas y empaquetado.

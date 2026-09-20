@@ -1,8 +1,8 @@
 {
     "name": "jsf-el-navigator",
     "displayName": "JSF EL Navigator",
-    "description": "Navegación JSF/PrimeFaces desde XHTML hacia Java y desde controladores hacia servicios inyectados.",
-    "version": "0.3.1",
+    "description": "Navega JSF/PrimeFaces EL: XHTML → Java → servicios inyectados. Navigate JSF EL definitions in VS Code.",
+    "version": "0.4.0",
     "publisher": "anthoserv",
     "author": {
         "name": "anthoserv"
@@ -34,7 +34,17 @@
         "PrimeFaces",
         "Expression Language",
         "XHTML",
-        "Java"
+        "Java",
+        "Java EE",
+        "Jakarta EE",
+        "Facelets",
+        "CDI",
+        "EJB",
+        "Spring",
+        "Maven",
+        "Gradle",
+        "ManagedBean",
+        "Go to Definition"
     ],
     "extensionKind": [
         "workspace"

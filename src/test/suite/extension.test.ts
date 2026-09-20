@@ -5,6 +5,8 @@ export async function runExtensionIntegrationTests(): Promise<void> {
     await activatesAnthoservExtension();
     await navigatesFromXhtmlToController();
     await navigatesFromControllerToService();
+    await offersMultipleServiceImplementations();
+    await selectsQualifiedServiceImplementation();
 }
 
 async function activatesAnthoservExtension(): Promise<void> {
@@ -42,6 +44,41 @@ async function navigatesFromControllerToService(): Promise<void> {
 
     assert.ok(definitions?.length, "No se resolvió la implementación del servicio");
     assert.match(targetUri(definitions[0]).fsPath, /ClienteServiceImpl\.java$/);
+}
+
+async function offersMultipleServiceImplementations(): Promise<void> {
+    const workspace = requireWorkspace();
+    const uri = vscode.Uri.joinPath(
+        workspace.uri,
+        "web/src/main/java/com/anthoserv/sample/NotificacionController.java"
+    );
+    const document = await vscode.workspace.openTextDocument(uri);
+    const position = positionInside(document, "servicio.enviar", "enviar");
+    const definitions = await vscode.commands.executeCommand<
+        Array<vscode.Location | vscode.LocationLink>
+    >("vscode.executeDefinitionProvider", uri, position);
+
+    assert.equal(definitions?.length, 2, "No se ofrecieron ambas implementaciones");
+    assert.deepEqual(
+        definitions.map((definition) => targetUri(definition).fsPath.split("/").pop()).sort(),
+        ["EmailNotificacionService.java", "SmsNotificacionService.java"]
+    );
+}
+
+async function selectsQualifiedServiceImplementation(): Promise<void> {
+    const workspace = requireWorkspace();
+    const uri = vscode.Uri.joinPath(
+        workspace.uri,
+        "web/src/main/java/com/anthoserv/sample/PagoController.java"
+    );
+    const document = await vscode.workspace.openTextDocument(uri);
+    const position = positionInside(document, "servicio.procesar", "procesar");
+    const definitions = await vscode.commands.executeCommand<
+        Array<vscode.Location | vscode.LocationLink>
+    >("vscode.executeDefinitionProvider", uri, position);
+
+    assert.equal(definitions?.length, 1, "El calificador no seleccionó un único servicio");
+    assert.match(targetUri(definitions[0]).fsPath, /PagoInternacionalService\.java$/);
 }
 
 function requireWorkspace(): vscode.WorkspaceFolder {

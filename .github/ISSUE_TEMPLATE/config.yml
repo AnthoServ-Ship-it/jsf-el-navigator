@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+    - name: Reporte privado de seguridad
+      url: https://github.com/AnthoServ-Ship-it/jsf-el-navigator/security/advisories/new
+      about: No publiques vulnerabilidades ni información sensible como un issue abierto.

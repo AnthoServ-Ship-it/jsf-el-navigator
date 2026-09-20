@@ -1,0 +1,73 @@
+name: Publicar versión
+
+on:
+    push:
+        tags:
+            - "v*"
+
+permissions:
+    contents: write
+
+jobs:
+    publicar:
+        name: Validar y publicar en Marketplace
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+
+        steps:
+            - name: Descargar código
+              uses: actions/checkout@v7
+
+            - name: Configurar Node.js
+              uses: actions/setup-node@v7
+              with:
+                  node-version: 22
+                  cache: npm
+
+            - name: Instalar dependencias
+              run: npm ci
+
+            - name: Comprobar versión de la etiqueta
+              shell: bash
+              run: |
+                  PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+                  TAG_VERSION="${GITHUB_REF_NAME#v}"
+                  test "$PACKAGE_VERSION" = "$TAG_VERSION" || {
+                    echo "La etiqueta $TAG_VERSION no coincide con package.json $PACKAGE_VERSION"
+                    exit 1
+                  }
+
+            - name: Validar proyecto
+              run: npm run validate
+
+            - name: Ejecutar prueba de integración
+              run: xvfb-run -a npm run test:integration
+              env:
+                  VSCODE_TEST_VERSION: 1.85.2
+
+            - name: Generar VSIX
+              run: npm run package
+
+            - name: Crear versión descargable en GitHub
+              shell: bash
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  VSIX_PATH="$(find . -maxdepth 1 -name '*.vsix' -print -quit)"
+                  if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+                    gh release upload "$GITHUB_REF_NAME" "$VSIX_PATH" --clobber
+                  else
+                    gh release create "$GITHUB_REF_NAME" "$VSIX_PATH" --generate-notes
+                  fi
+
+            - name: Publicar en Visual Studio Marketplace
+              shell: bash
+              env:
+                  VSCE_PAT: ${{ secrets.VSCE_PAT }}
+              run: |
+                  test -n "$VSCE_PAT" || {
+                    echo "Falta configurar el secreto VSCE_PAT"
+                    exit 1
+                  }
+                  VSIX_PATH="$(find . -maxdepth 1 -name '*.vsix' -print -quit)"
+                  npx vsce publish --packagePath "$VSIX_PATH" -p "$VSCE_PAT"

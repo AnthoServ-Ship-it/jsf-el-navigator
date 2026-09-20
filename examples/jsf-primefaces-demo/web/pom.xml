@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.anthoserv.demo</groupId>
+        <artifactId>jsf-primefaces-demo</artifactId>
+        <version>1.0.0</version>
+    </parent>
+    <artifactId>demo-web</artifactId>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.anthoserv.demo</groupId>
+            <artifactId>demo-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.platform</groupId>
+            <artifactId>jakarta.jakartaee-web-api</artifactId>
+            <version>10.0.0</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+</project>

@@ -1,0 +1,24 @@
+name: Proponer una mejora
+description: Sugiere una nueva capacidad para proyectos JSF, Jakarta EE o Spring.
+title: "[Mejora]: "
+labels: [enhancement]
+body:
+    - type: textarea
+      id: problem
+      attributes:
+          label: Problema que necesitas resolver
+          description: Explica el caso real antes de proponer la solución.
+      validations:
+          required: true
+    - type: textarea
+      id: example
+      attributes:
+          label: Ejemplo mínimo
+          description: Agrega el XHTML, anotación o estructura Java involucrada.
+          render: java
+    - type: textarea
+      id: expected
+      attributes:
+          label: Comportamiento esperado
+      validations:
+          required: true

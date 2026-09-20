@@ -28,9 +28,12 @@ Controlador Java
     -> implementación concreta / clase base / interfaz
 ```
 
-El parser identifica campos inyectados mediante `@EJB`, `@Inject` o `@Autowired`.
-Cuando existe un `lookup` EJB, la implementación indicada tiene prioridad. Las
-sobrecargas se comparan mediante cantidad y tipos inferidos de los argumentos.
+El parser identifica campos inyectados mediante `@EJB`, `@Inject`, `@Autowired`
+o `@Resource`, además de constructores anotados con `@Inject` o `@Autowired`.
+Cuando existe un `lookup` EJB, la implementación indicada tiene prioridad. Si no,
+se consideran la convención `InterfazImpl`, los calificadores y las relaciones
+`implements`. Si hay varias implementaciones válidas, VS Code muestra un selector.
+Las sobrecargas se comparan mediante cantidad y tipos inferidos de los argumentos.
 
 ## Componentes
 
@@ -51,6 +54,8 @@ sobrecargas se comparan mediante cantidad y tipos inferidos de los argumentos.
 - Las búsquedas compartidas no se cancelan por movimientos pasajeros del cursor.
 - Los proveedores nunca modifican el código del usuario.
 - La extensión no recopila telemetría ni transmite archivos.
+- La búsqueda amplia de implementaciones solo ocurre cuando no existe un destino
+  explícito ni una clase que siga la convención `InterfazImpl`.
 
 ## Límites conocidos
 

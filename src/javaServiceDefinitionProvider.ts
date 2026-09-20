@@ -40,7 +40,7 @@ export class JavaServiceDefinitionProvider implements vscode.DefinitionProvider 
             `[INFO] Resolviendo servicio ${target.service.fieldName}.${target.methodName} en ${projectRoot.fsPath}.`
         );
 
-        const files = await this.findServiceFiles(projectRoot, target);
+        const files = await this.findServiceFiles(projectRoot, target, token);
         if (token.isCancellationRequested) {
             return undefined;
         }
@@ -57,6 +57,7 @@ export class JavaServiceDefinitionProvider implements vscode.DefinitionProvider 
             visitedFiles.add(uri.toString());
             const source = await readSource(uri);
             const parsed = parseJavaBean(source, true);
+            const linksBeforeFile = links.length;
             const matchingMembers = parsed
                 ? parsed.members.filter(
                       (member) => member.kind === "method" && member.name === target.methodName
@@ -76,14 +77,8 @@ export class JavaServiceDefinitionProvider implements vscode.DefinitionProvider 
                 links.push(await createLink(uri, span, originSelectionRange));
             }
 
-            if (links.length === 0 && parsed?.superClassName) {
+            if (links.length === linksBeforeFile && parsed?.superClassName) {
                 files.push(...(await this.findClassFiles(projectRoot, parsed.superClassName)));
-            }
-
-            // El lookup EJB identifica la implementación concreta. Si el método
-            // se encontró allí, no mezclamos la declaración de la interfaz.
-            if (links.length > 0) {
-                break;
             }
         }
 
@@ -97,34 +92,58 @@ export class JavaServiceDefinitionProvider implements vscode.DefinitionProvider 
 
     private async findServiceFiles(
         projectRoot: vscode.Uri,
-        target: JavaServiceTarget
+        target: JavaServiceTarget,
+        token: vscode.CancellationToken
     ): Promise<vscode.Uri[]> {
-        const names = new Set<string>();
         if (target.service.implementationClass) {
-            names.add(target.service.implementationClass);
-        }
-        names.add(`${target.service.typeName}Impl`);
-        names.add(target.service.typeName);
-
-        const files: vscode.Uri[] = [];
-        for (const className of names) {
-            const found = await vscode.workspace.findFiles(
-                new vscode.RelativePattern(projectRoot, `**/src/main/java/**/${className}.java`),
-                "**/{target,build,node_modules,.git}/**"
+            const explicitImplementation = await this.findClassFiles(
+                projectRoot,
+                target.service.implementationClass
             );
-            for (const uri of found) {
-                if (!files.some((existing) => existing.toString() === uri.toString())) {
-                    files.push(uri);
+            if (explicitImplementation.length > 0) {
+                return explicitImplementation;
+            }
+        }
+
+        const conventionalFiles: vscode.Uri[] = [];
+        for (const uri of await this.findClassFiles(
+            projectRoot,
+            `${target.service.typeName}Impl`
+        )) {
+            addUniqueUri(conventionalFiles, uri);
+        }
+        if (conventionalFiles.length > 0 && !target.service.qualifier) {
+            return conventionalFiles;
+        }
+        if (target.service.qualifier) {
+            const qualifiedConventional: vscode.Uri[] = [];
+            for (const uri of conventionalFiles) {
+                try {
+                    if (declaresQualifier(await readSource(uri), target.service.qualifier)) {
+                        qualifiedConventional.push(uri);
+                    }
+                } catch {
+                    // Se continúa con la búsqueda general de implementaciones.
                 }
             }
-
-            // Se prioriza la primera implementación encontrada. La interfaz se
-            // usa únicamente como respaldo cuando no existe código fuente.
-            if (found.length > 0) {
-                return files;
+            if (qualifiedConventional.length > 0) {
+                return qualifiedConventional;
             }
         }
-        return files;
+
+        const implementations = await this.findImplementations(
+            projectRoot,
+            target.service.typeName,
+            target.service.qualifier,
+            token
+        );
+        if (implementations.length > 0) {
+            return implementations;
+        }
+
+        // La interfaz es el último respaldo cuando el proyecto no incluye una
+        // implementación concreta o esta proviene de una dependencia externa.
+        return this.findClassFiles(projectRoot, target.service.typeName);
     }
 
     private findClassFiles(projectRoot: vscode.Uri, className: string): Thenable<vscode.Uri[]> {
@@ -134,6 +153,64 @@ export class JavaServiceDefinitionProvider implements vscode.DefinitionProvider 
             "**/{target,build,node_modules,.git}/**"
         );
     }
+
+    private async findImplementations(
+        projectRoot: vscode.Uri,
+        interfaceName: string,
+        qualifier: string | undefined,
+        token: vscode.CancellationToken
+    ): Promise<vscode.Uri[]> {
+        const javaFiles = await vscode.workspace.findFiles(
+            new vscode.RelativePattern(projectRoot, "**/src/main/java/**/*.java"),
+            "**/{target,build,node_modules,.git}/**"
+        );
+        const matches: Array<{ uri: vscode.Uri; source: string }> = [];
+
+        for (const uri of javaFiles) {
+            if (token.isCancellationRequested) {
+                return [];
+            }
+            try {
+                const source = await readSource(uri);
+                const parsed = parseJavaBean(source, true);
+                if (
+                    parsed?.interfaceNames.some(
+                        (candidate) => simpleClassName(candidate) === interfaceName
+                    )
+                ) {
+                    matches.push({ uri, source });
+                }
+            } catch {
+                // Un archivo ilegible no debe bloquear la navegación del resto.
+            }
+        }
+
+        if (qualifier) {
+            const qualified = matches.filter(({ source }) => declaresQualifier(source, qualifier));
+            if (qualified.length > 0) {
+                return qualified.map(({ uri }) => uri);
+            }
+        }
+        return matches.map(({ uri }) => uri);
+    }
+}
+
+function addUniqueUri(files: vscode.Uri[], uri: vscode.Uri): void {
+    if (!files.some((existing) => existing.toString() === uri.toString())) {
+        files.push(uri);
+    }
+}
+
+function simpleClassName(value: string): string {
+    const withoutGenerics = value.replace(/<.*>/, "").trim();
+    return withoutGenerics.slice(withoutGenerics.lastIndexOf(".") + 1);
+}
+
+function declaresQualifier(source: string, qualifier: string): boolean {
+    const escapedQualifier = qualifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(
+        `@(?:[A-Za-z_$][A-Za-z0-9_$]*\\.)*(?:Named|Qualifier|Service|Component)\\s*\\(\\s*(?:value\\s*=\\s*)?"${escapedQualifier}"`
+    ).test(source);
 }
 
 function selectBestOverloads(

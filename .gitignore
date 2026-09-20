@@ -1,5 +1,7 @@
 node_modules/
 dist/
+target/
+build/
 *.vsix
 *.log
 .DS_Store

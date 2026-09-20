@@ -1,0 +1,55 @@
+name: Reportar un problema
+description: Informa un fallo reproducible de navegación, diagnóstico o rendimiento.
+title: "[Bug]: "
+labels: [bug]
+body:
+    - type: markdown
+      attributes:
+          value: Gracias por ayudar a mejorar JSF EL Navigator.
+    - type: input
+      id: version
+      attributes:
+          label: Versión de la extensión
+          placeholder: 0.4.0
+      validations:
+          required: true
+    - type: input
+      id: vscode
+      attributes:
+          label: Versión de VS Code y sistema operativo
+          placeholder: VS Code 1.85.2, Ubuntu 24.04
+      validations:
+          required: true
+    - type: dropdown
+      id: navigation
+      attributes:
+          label: Tipo de navegación afectada
+          options:
+              - XHTML hacia controlador
+              - Controlador hacia servicio
+              - Servicio hacia DAO
+              - Buscar referencias
+              - Autocompletado o diagnósticos
+              - Otro
+      validations:
+          required: true
+    - type: textarea
+      id: reproduce
+      attributes:
+          label: Pasos para reproducir
+          description: Incluye un ejemplo mínimo de XHTML y Java sin información privada.
+      validations:
+          required: true
+    - type: textarea
+      id: output
+      attributes:
+          label: Salida de diagnóstico
+          description: "Ejecuta “JSF EL Navigator: Mostrar diagnóstico del índice”."
+          render: text
+    - type: checkboxes
+      id: privacy
+      attributes:
+          label: Privacidad
+          options:
+              - label: Confirmo que eliminé contraseñas, tokens y código confidencial.
+                required: true
