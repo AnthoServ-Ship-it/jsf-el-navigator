@@ -2,7 +2,7 @@
     "name": "jsf-el-navigator",
     "displayName": "JSF EL Navigator",
     "description": "Navega JSF/PrimeFaces EL: XHTML → Java → servicios inyectados. Navigate JSF EL definitions in VS Code.",
-    "version": "0.4.19",
+    "version": "0.4.20",
     "publisher": "anthoserv",
     "author": {
         "name": "anthoserv"

@@ -1,5 +1,10 @@
 # Registro de cambios
 
+## 0.4.20
+
+- Compatibilidad de la prueba de integración con VS Code 1.85, que no serializa el texto del enlace resuelto.
+- Se conserva completa la documentación de métodos al mantener `Ctrl` en versiones actuales de VS Code.
+
 ## 0.4.19
 
 - Al mantener `Ctrl` sobre un método, la ayuda del enlace muestra la clase propietaria, la firma, el JavaDoc y la ubicación.
