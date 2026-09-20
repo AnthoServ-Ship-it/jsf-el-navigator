@@ -1,0 +1,162 @@
+{
+    "name": "jsf-el-navigator",
+    "displayName": "JSF EL Navigator",
+    "description": "Navegación JSF/PrimeFaces desde XHTML hacia Java y desde controladores hacia servicios inyectados.",
+    "version": "0.3.1",
+    "publisher": "anthoserv",
+    "author": {
+        "name": "anthoserv"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/AnthoServ-Ship-it/jsf-el-navigator.git"
+    },
+    "homepage": "https://github.com/AnthoServ-Ship-it/jsf-el-navigator#readme",
+    "bugs": {
+        "url": "https://github.com/AnthoServ-Ship-it/jsf-el-navigator/issues"
+    },
+    "license": "MIT",
+    "icon": "assets/icon.png",
+    "galleryBanner": {
+        "color": "#102A43",
+        "theme": "dark"
+    },
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Other"
+    ],
+    "keywords": [
+        "JSF",
+        "Jakarta Faces",
+        "PrimeFaces",
+        "Expression Language",
+        "XHTML",
+        "Java"
+    ],
+    "extensionKind": [
+        "workspace"
+    ],
+    "activationEvents": [
+        "onLanguage:html",
+        "onLanguage:xml",
+        "onLanguage:xhtml",
+        "onLanguage:java",
+        "onCommand:jsfElNavigator.goToDefinition",
+        "onCommand:jsfElNavigator.goToDefinitionAt",
+        "onCommand:jsfElNavigator.goToServiceDefinition",
+        "onCommand:jsfElNavigator.goToServiceDefinitionAt",
+        "onCommand:jsfElNavigator.rebuildIndex",
+        "onCommand:jsfElNavigator.showDiagnostics"
+    ],
+    "main": "./dist/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "jsfElNavigator.goToDefinition",
+                "title": "Ir a la definición Java",
+                "category": "JSF EL Navigator"
+            },
+            {
+                "command": "jsfElNavigator.rebuildIndex",
+                "title": "Reconstruir índice Java",
+                "category": "JSF EL Navigator"
+            },
+            {
+                "command": "jsfElNavigator.goToServiceDefinition",
+                "title": "Ir a la implementación del servicio",
+                "category": "JSF EL Navigator"
+            },
+            {
+                "command": "jsfElNavigator.showDiagnostics",
+                "title": "Mostrar diagnóstico del índice",
+                "category": "JSF EL Navigator"
+            }
+        ],
+        "keybindings": [
+            {
+                "command": "jsfElNavigator.goToDefinition",
+                "key": "f12",
+                "when": "editorTextFocus && resourceExtname == .xhtml"
+            }
+        ],
+        "menus": {
+            "editor/context": [
+                {
+                    "command": "jsfElNavigator.goToDefinition",
+                    "when": "resourceExtname == .xhtml",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "jsfElNavigator.goToServiceDefinition",
+                    "when": "editorLangId == java",
+                    "group": "navigation@1"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "JSF EL Navigator",
+            "properties": {
+                "jsfElNavigator.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Activa la navegación desde expresiones EL en archivos XHTML hacia código Java."
+                },
+                "jsfElNavigator.javaServiceNavigation.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Activa Ctrl+clic desde llamadas Java de controladores hacia servicios @EJB, @Inject o @Autowired."
+                },
+                "jsfElNavigator.diagnostics.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Marca en XHTML los beans y miembros Java que no se encuentran en el módulo actual."
+                },
+                "jsfElNavigator.additionalJavaSourceRoots": {
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "Rutas adicionales de código Java, absolutas o relativas al módulo Maven del XHTML."
+                },
+                "jsfElNavigator.logging": {
+                    "type": "string",
+                    "default": "info",
+                    "enum": [
+                        "off",
+                        "info",
+                        "debug"
+                    ],
+                    "description": "Nivel de detalle del canal de salida de JSF EL Navigator."
+                }
+            }
+        }
+    },
+    "scripts": {
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "check": "tsc -p ./ --noEmit",
+        "lint": "eslint .",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "test": "npm run test:unit",
+        "test:unit": "npm run compile && node --test dist/test/*.test.js",
+        "test:integration": "npm run compile && node dist/test/runIntegrationTests.js",
+        "validate": "npm run check && npm run lint && npm run format:check && npm run test:unit",
+        "package": "npm run validate && node scripts/package.cjs"
+    },
+    "devDependencies": {
+        "@eslint/js": "9.39.5",
+        "@types/node": "^18.19.0",
+        "@types/vscode": "^1.85.0",
+        "@vscode/test-electron": "2.5.2",
+        "@vscode/vsce": "3.9.2",
+        "eslint": "9.39.5",
+        "prettier": "3.9.8",
+        "typescript-eslint": "8.70.0",
+        "typescript": "^5.7.3"
+    }
+}

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.vscode-test/
+*.vsix
+package-lock.json
+assets/
+src/test/fixtures/

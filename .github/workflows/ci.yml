@@ -1,0 +1,48 @@
+name: Calidad
+
+on:
+    push:
+        branches: [master]
+    pull_request:
+        branches: [master]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    validar:
+        name: Validar y empaquetar
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+
+        steps:
+            - name: Descargar código
+              uses: actions/checkout@v4
+
+            - name: Configurar Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: npm
+
+            - name: Instalar dependencias
+              run: npm ci
+
+            - name: Validar proyecto
+              run: npm run validate
+
+            - name: Ejecutar prueba de integración
+              run: xvfb-run -a npm run test:integration
+              env:
+                  VSCODE_TEST_VERSION: 1.85.2
+
+            - name: Generar VSIX
+              run: npm run package
+
+            - name: Guardar VSIX
+              uses: actions/upload-artifact@v4
+              with:
+                  name: jsf-el-navigator-vsix
+                  path: "*.vsix"
+                  if-no-files-found: error
