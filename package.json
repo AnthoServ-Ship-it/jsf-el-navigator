@@ -149,7 +149,7 @@
         "package": "npm run validate && node scripts/package.cjs"
     },
     "devDependencies": {
-        "@eslint/js": "9.39.5",
+        "@eslint/js": "10.0.1",
         "@types/node": "^18.19.0",
         "@types/vscode": "^1.85.0",
         "@vscode/test-electron": "2.5.2",
